@@ -53,6 +53,8 @@ module WhereExists
 
     queries_sql =
       queries.map do |query|
+        query = remove_self_joins_from_query(query)
+
         "EXISTS (" + query.to_sql + ")"
       end
     queries_sql.join(" OR ")
@@ -239,6 +241,14 @@ module WhereExists
 
   def quote_table_and_column_name(table_name, column_name)
     connection.quote_table_name(table_name) + '.' + connection.quote_column_name(column_name)
+  end
+
+  def remove_self_joins_from_query(query)
+    query.arel.ast.cores.each do |core|
+      core.source.right = core.source.right.reject { it.left.name == self.table_name }
+    end
+
+    query
   end
 end
 

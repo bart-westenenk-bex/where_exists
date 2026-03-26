@@ -244,6 +244,8 @@ module WhereExists
   end
 
   def remove_self_joins_from_query(query)
+    binding.irb
+    
     query.arel.ast.cores.each do |core|
       core.source.right = core.source.right.reject { it.left.name == self.table_name }
     end

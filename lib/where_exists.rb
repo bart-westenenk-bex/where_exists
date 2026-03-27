@@ -12,22 +12,20 @@ module WhereExists
   protected
 
   def where_exists_or_not_exists(does_exist, association_name, where_parameters, &block)
-    queries_sql = build_exists_string(association_name, *where_parameters, &block)
+    query = build_exists_arel(association_name, *where_parameters, &block)
 
-    if does_exist
-      not_string = ""
-    else
-      not_string = "NOT "
-    end
-
-    if queries_sql.empty?
+    if query.nil?
       does_exist ? self.none : self.all
     else
-      self.where("#{not_string}(#{queries_sql})")
+      if does_exist
+        self.where(query.not)
+      else
+        self.where(query)
+      end
     end
   end
 
-  def build_exists_string(association_name, *where_parameters, &block)
+  def build_exists_arel(association_name, *where_parameters, &block)
     association = self.reflect_on_association(association_name)
 
     unless association
@@ -51,13 +49,11 @@ module WhereExists
       raise ArgumentError.new("where_exists: not supported association - #{inspection}")
     end
 
-    queries_sql =
+    queries_arel =
       queries.map do |query|
-        query = remove_self_joins_from_query(query)
-
-        "EXISTS (" + query.to_sql + ")"
+        query.arel.exists
       end
-    queries_sql.join(" OR ")
+    queries_arel.reduce { |acc, query| acc.or(query) }
   end
 
   def where_exists_for_belongs_to_query(association, where_parameters, &block)
@@ -95,6 +91,7 @@ module WhereExists
         query = query.where("#{self_type} IN (?)", other_types.uniq)
       end
       query = yield query if block_given?
+
       queries.push query
     end
 
@@ -216,7 +213,7 @@ module WhereExists
       lambda do |it|
         block.call(it.instance_exec(&scope))
       end
-    str = query.klass.build_exists_string(
+    str = query.klass.build_exists_arel(
       next_association[:association].name,
       *[
         *next_association[:params]
@@ -243,11 +240,9 @@ module WhereExists
     connection.quote_table_name(table_name) + '.' + connection.quote_column_name(column_name)
   end
 
-  def remove_self_joins_from_query(query)
-    binding.irb
-    
+  def remove_self_joins_from_query(query)    
     query.arel.ast.cores.each do |core|
-      core.source.right = core.source.right.reject { it.left.name == self.table_name }
+      raise "Self join detected" if core.source.right.any? { it.left.name == self.table_name }
     end
 
     query

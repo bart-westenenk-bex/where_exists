@@ -18,14 +18,14 @@ module WhereExists
       does_exist ? self.none : self.all
     else
       if does_exist
-        self.where(query.not)
-      else
         self.where(query)
+      else
+        self.where(query.not)
       end
     end
   end
-
-  def build_exists_arel(association_name, *where_parameters, &block)
+  
+  def build_queries(association_name, *where_parameters, &block)
     association = self.reflect_on_association(association_name)
 
     unless association
@@ -49,8 +49,15 @@ module WhereExists
       raise ArgumentError.new("where_exists: not supported association - #{inspection}")
     end
 
+    queries
+  end
+
+  def build_exists_arel(association_name, *where_parameters, &block)
+    queries = build_queries(association_name, *where_parameters, &block)
+
     queries_arel =
       queries.map do |query|
+        binding.irb
         query.arel.exists
       end
     queries_arel.reduce { |acc, query| acc.or(query) }
@@ -206,14 +213,14 @@ module WhereExists
     [result]
   end
 
-  def loop_nested_association(query, next_association = {}, nested = false, &block)
+  def loop_nested_association(arel_query, next_association = {}, nested = false, &block)
     scope = next_association[:scope] || -> { self }
     block ||= ->(it) { it }
     block_with_scope =
       lambda do |it|
         block.call(it.instance_exec(&scope))
       end
-    str = query.klass.build_exists_arel(
+    queries = arel_query.klass.build_queries(
       next_association[:association].name,
       *[
         *next_association[:params]
@@ -222,8 +229,9 @@ module WhereExists
     )
 
     if next_association[:next_association] && next_association[:next_association][:association]
-      subq = str.match(/\([^\(\)]+\)/mi)[0]
-      str.sub!(subq) do
+      binding.irb
+      subq = arel_query.match(/\([^\(\)]+\)/mi)[0]
+      arel_query.sub!(subq) do
         "(#{subq} AND (#{loop_nested_association(
           next_association[:association],
           next_association[:next_association],
@@ -233,7 +241,7 @@ module WhereExists
       end
     end
 
-    nested ? str : [query.where(str)]
+    nested ? arel_query : [arel_query.where(arel_query)]
   end
 
   def quote_table_and_column_name(table_name, column_name)
